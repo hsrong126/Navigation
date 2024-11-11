@@ -50,17 +50,18 @@ class Viewer():
         marker.color.b = 255 / 255
         marker.color.a = 1.0
         rospy.sleep(0.4)    #
-        self.Marker_Pub.publish(marker)
+        self.pub.publish(marker)
 
 
 def markpoint(waypoints):
     viewer = Viewer()
     for i in waypoints:
-        viewer.pub(i, waypoints[i])
+        viewer.publish(i, waypoints[i])
 
 
 if __name__ == '__main__':
     rospy.init_node('TopologyMap_server')
+    
     # Get All Parameters
     graph = rospy.get_param(rospy.get_name() + "/graph")
     waypoints = rospy.get_param(rospy.get_name() + "/waypoints")
