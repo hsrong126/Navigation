@@ -8,6 +8,8 @@ from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 import forklift_server.msg
 import tf
 from visualization_msgs.msg import Marker
+from dynamic_reconfigure.client import Client
+
 
 # Create a topology map for navigation planning
 class TopologyMap():
@@ -16,27 +18,19 @@ class TopologyMap():
         self.start = ""
         self.goal = ""
 
-    def get_ajacency_list(self):    # Convert directed to undirected graph
-        adjacency = {}
-        for vertex in GRAPH.keys():
-            # 確保每個節點在無向圖中都有一個紀錄
-            if vertex not in adjacency:
-                adjacency[vertex] = dict()
+    def get_ajacency_list(self):    # Convert directed graph to undirected graph
+        adjacency = {vertex: {} for vertex in GRAPH.keys()}
 
-            for neighbor, weight in GRAPH[vertex].items():
-                adjacency[vertex].update({neighbor: weight})
-
-                # 確保每個鄰邊在無向圖中都有一個紀錄
-                if neighbor not in adjacency:
-                    adjacency[neighbor] = dict()
-                
-                adjacency[neighbor].update({vertex: weight})
+        for vertex, neighbors in GRAPH.items():
+            for neighbor, weight in neighbors.items():
+                adjacency[vertex][neighbor] = weight
+                adjacency.setdefault(neighbor, {})[vertex] = weight
 
         return adjacency
 
-    # Find the shortest path using dijkstra.
-    # Return a tuple - (a int that means cost, a LIST that is shortest(minium cost) path).
-    def dijkstra(self):     
+    # Find the shortest path using Dijkstra's algorithm.
+    # Return a tuple - (an integer representing cost, a list that is the shortest (minimum cost) path).
+    def dijkstra(self):
         # 檢查起始點和終點是否在圖中
         if self.start not in self.graph or self.goal not in self.graph:
             raise ValueError(f"起始點 '{self.start}' 或終點 '{self.goal}' 不在圖中")
@@ -89,8 +83,7 @@ class Navigation():
         try:
             listener.waitForTransform('map', 'base_link', rospy.Time(0), rospy.Duration(4.0))
             (trans, rot) = listener.lookupTransform('map', 'base_link', rospy.Time(0))
-            # return trans[0], trans[1], rot[2], rot[3]
-            return float(trans[0]), float(trans[1])
+            return float(trans[0]), float(trans[1]), float(rot[2]), float(rot[3])
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
             rospy.logerr(e)
             return 0.0, 0.0, 0.0, 0.0
@@ -117,21 +110,13 @@ class Navigation():
 
         # Pass Point
         while True:
-            pose_x, pose_y = self.get_robot_pose()
+            pose_x, pose_y, _, _ = self.get_robot_pose()
             dx = abs(pose_x - float(x)); dy = abs(pose_y - float(y))
             current_distance = sqrt(pow(dx, 2) + pow(dy, 2))
-            # rospy.loginfo('Current Dis: %f' % current_distance)
-            if current_distance < PASS_DISTANCE:
+            if (current_distance < PASS_DISTANCE):
                 rospy.loginfo('Navigation: done!')
-                return self.client.get_result
-        
-        # Not Pass Point
-        # wait = self.client.wait_for_result()
-        # if not wait:
-        #     rospy.logerr("Action server not available!")
-        #     rospy.signal_shutdown("Action server not available!")
-        # else:
-        #     return self.client.get_result()
+                break
+        return self.client.get_result
 
 # Implementation of multiple-point navigation
 class TopologyMapAction():
@@ -142,7 +127,7 @@ class TopologyMapAction():
     def __init__(self, name):
         # Initial simple action server
         self._action_name = name
-        self._as = actionlib.SimpleActionServer(self._action_name, forklift_server.msg.TopologyMapAction, execute_cb=self.execute_callback, auto_start = False)
+        self._as = actionlib.SimpleActionServer(self._action_name, forklift_server.msg.TopologyMapAction, execute_cb = self.execute_callback, auto_start = False)
         self._as.start()
         
         # For path planning
@@ -156,12 +141,26 @@ class TopologyMapAction():
         # Path planning
         self.topology.goal = msg.goal
         cost, paths = self.topology.dijkstra()
+
+        # For dynamic parameters
+        lastpoint_z, lastpoint_w = None, None
+
         for i in paths:
+            rospy.sleep(0.6)    # Don't delete!
+            # Dynamic parameters
+            if (lastpoint_z is not None) and (lastpoint_w is not None):  # First Point Not Change
+                if (lastpoint_z == WAYPOINT[i][2]) and (lastpoint_w == WAYPOINT[i][3]):
+                    teb_client.update_configuration({"weight_max_vel_theta": 200, "weight_acc_lim_theta": 200})
+                else:
+                    teb_client.update_configuration({"weight_max_vel_theta": 0.1, "weight_acc_lim_theta": 0.1})
+            lastpoint_z, lastpoint_w = WAYPOINT[i][2], WAYPOINT[i][3]
+            
+            # Navigation to goal
             if self.navigation.move(i):
                 rospy.loginfo('TopologyMapAction: %s execution done!' % i)
-        self.topology.start = msg.goal    # Last node is start node for next navigation request.
 
         # TopologyMapAction Done
+        self.topology.start = msg.goal    # Last node is start node for next navigation request.
         self._as.publish_feedback(self._feedback)
         rospy.logwarn('%s: Succeeded' % self._action_name)
         self._as.set_succeeded(self._result)
@@ -186,7 +185,6 @@ class Viewer():
         marker.pose.position.x = loc[0]
         marker.pose.position.y = loc[1]
         marker.pose.position.z = 0.0
-
         marker.pose.orientation.x = 0.0
         marker.pose.orientation.y = 0.0
         marker.pose.orientation.z = loc[2]
@@ -209,10 +207,11 @@ if __name__ == '__main__':
     rate = rospy.Rate(10)
 
     # Initial parameters
-    ODOMTOPIC = rospy.get_param(rospy.get_name() + "/odom", "/odom")
     DELAY = rospy.get_param(rospy.get_name() + "/delay")
     PASS_DISTANCE = rospy.get_param(rospy.get_name() + "/pass_distance", "1.1")
-    SPIN = rospy.get_param(rospy.get_name() + "/spin") # True/False
+    PASS_ROTATION = rospy.get_param(rospy.get_name() + "/pass_rotation", "0.1")
+    
+    SPIN = rospy.get_param(rospy.get_name() + "/spin", False) # True/False
     START = rospy.get_param(rospy.get_name() + "/start_node", "START")
     GRAPH = rospy.get_param(rospy.get_name() + "/graph")
     WAYPOINT = rospy.get_param(rospy.get_name() + "/waypoints")
@@ -221,10 +220,14 @@ if __name__ == '__main__':
     viewer = Viewer()
     for name in WAYPOINT.keys():
         viewer.publish(name)
-        rospy.loginfo("PublishMarker: %s", name)
+        rospy.loginfo("Publish marker: %s", name)
 
     # Create a server to receive navigation requests
-    rospy.logwarn('TopologyMapServer start')
+    rospy.logwarn('TopologyMapServer starting')
     server = TopologyMapAction(rospy.get_name())
+
+    # Dynamic modify TEB Local Planner Parameters
+    teb_client = Client("move_base/TebLocalPlannerROS")
+    rospy.logwarn('TebLocalPlannerROS dynamic modify start')
     
     rospy.spin()
