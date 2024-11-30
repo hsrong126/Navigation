@@ -1,0 +1,62 @@
+<launch>
+<node pkg="forklift_server" type="Topology.py" name="TopologyMapServer" output="screen">
+
+    <param name="odom" value="/wheel_odom" />   <!--里程計 Topic（map -> base_link, 是tf相對關係, 非輪式里程計）/-->
+    
+    <!-- 導航行為 -->
+    <param name="spin" value="False" />
+    <param name="delay" value="0.6" />          <!-- 建議≥0.6 -->
+    <param name="pass_distance" value="1.1" />
+    
+    <!-- 路線設置 -->
+    <param name="start_node" value="START" />
+    <rosparam command="delete" param="graph" />
+    <rosparam param= "graph">
+    {
+
+        <!-- "<Point>": {"<Point>": <weight>} -->
+        "START":{"A_1":5},
+        "A_1":{"A_2":5},
+        "A_2":{"A_3":5},
+        "A_3":{"A_4":5},
+        "A_4":{"A_5":5},
+        "A_5":{"A_6":5},
+        "A_6":{"A_7":5},
+        "A_7":{"A_8":5},
+        "A_8":{"A_9":5},
+        "A_9":{"A_10":5},
+        "A_10":{"A_11":5},
+        "A_11":{"A_12":5},
+        "A_12":{"A_13":5}
+
+    }
+    </rosparam>
+    <rosparam command="delete" param="waypoints" />
+    <rosparam param= "waypoints">
+    {
+
+        <!-- "<Point>": [<x>, <y>, <zr>, <w>] -->
+        "START": [2.31, 0.34,  0.000,  1.000],
+        "A_1":[11.50,  0.03,   0.000,  1.000],
+        "A_2":[21.55, -0.42,   0.000,  1.000],
+        "A_3":[34.62, -0.66,   0.000,  1.000],
+
+        "A_4":[39.15, -4.16,  -0.406,  0.913],
+        "A_5":[43.84, -7.58,  -0.026,  1.000],
+
+        "A_6":[46.97, -4.21,   0.707,  0.707],
+        "A_7":[47.57,  2.28,   0.707,  0.707],
+
+        "A_8":[43.96,  4.45,   1.000,  0.008],
+        "A_9":[40.12,  2.16,  -0.900,  0.450],
+
+        "A_10":[34.62, -0.66,  1.000,  0.000],
+        "A_11":[21.55, -0.42,  1.000,  0.000],
+        "A_12":[11.50,  0.03,  1.000,  0.000],
+        "A_13":[ 2.31,  0.34,  1.000,  0.000]
+
+    }
+    </rosparam>
+
+</node>
+</launch>
